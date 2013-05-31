@@ -69,6 +69,7 @@ sub run {
         try {
             $self->$call(@commands);
         } catch {
+            warn $_;
             /Carton::Error::CommandExit/ and return;
             die $_;
         }
