@@ -3,7 +3,7 @@ package Carton;
 use strict;
 use warnings;
 use 5.008_005;
-use version; our $VERSION = version->declare("v0.9.15");
+use version; our $VERSION = version->declare("v0.9.15_001");
 
 use Cwd;
 use Config qw(%Config);
@@ -25,6 +25,26 @@ sub new {
         path => $ENV{PERL_CARTON_PATH} || 'local',
         mirror => $ENV{PERL_CARTON_MIRROR} || $DefaultMirror,
     }, $class;
+}
+
+sub _mirrors {
+    my $self = shift;
+    split /,/, $self->{mirror};
+}
+
+sub effective_mirrors {
+    my $self = shift;
+
+    my @mirrors = $self->_mirrors;
+    push @mirrors, $DefaultMirror if $self->custom_mirror;
+    push @mirrors, "http://backpan.perl.org/"; # fallback
+
+    @mirrors;
+}
+
+sub custom_mirror {
+    my $self = shift;
+    grep { $_ ne $DefaultMirror } $self->_mirrors;
 }
 
 sub configure {
@@ -84,16 +104,13 @@ sub download_from_cpanfile {
     my $index = $self->build_index($self->lock->{modules});
     $self->build_mirror_file($index, $self->{mirror_file});
 
-    my $mirror = $self->{mirror} || $DefaultMirror;
-
     local $self->{path} = File::Temp::tempdir(CLEANUP => 1); # ignore installed
 
     $self->run_cpanm(
-        "--mirror", $mirror,
-        "--mirror", "http://backpan.perl.org/", # fallback
+        ( map { ("--mirror", $_) } $self->effective_mirrors ),
         "--mirror-index", $self->{mirror_file},
         "--no-skip-satisfied",
-        ( $mirror ne $DefaultMirror ? "--mirror-only" : () ),
+        ( $self->custom_mirror ? "--mirror-only" : () ),
         "--scandeps",
         "--save-dists", $local_mirror,
         @$modules,
@@ -110,20 +127,11 @@ sub install_conservative {
         $self->build_mirror_file($index, $self->{mirror_file});
     }
 
-    my $mirror = $self->{mirror} || $DefaultMirror;
-
-    my $is_default_mirror = 0;
-    if ( !ref $mirror ) {
-        $is_default_mirror = $mirror eq $DefaultMirror ? 1 : 0;
-        $mirror = [split /,/, $mirror];
-    }
-
     $self->run_cpanm(
-        (map { ("--mirror", $_) } @{$mirror}),
-        "--mirror", "http://backpan.perl.org/", # fallback
-        "--skip-satisfied",
-        ( $is_default_mirror ? () : "--mirror-only" ),
+        ( map { ("--mirror", $_) } $self->effective_mirrors ),
         ( $self->lock ? ("--mirror-index", $self->{mirror_file}) : () ),
+        "--skip-satisfied",
+        ( $self->custom_mirror ? "--mirror-only" : () ),
         ( $cascade ? "--cascade-search" : () ),
         @$modules,
     );
@@ -433,7 +441,7 @@ Carton - Perl module dependency manager (aka Bundler for Perl)
   > cat cpanfile
   requires 'Plack', 0.9980;
   requires 'Starman', 0.2000;
-  
+
   > carton install
   > git add cpanfile carton.lock
   > git commit -m "add Plack and Starman"
